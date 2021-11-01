@@ -1,5 +1,5 @@
 import os
 
-def detect(s):
+def detect_linguist(s):
     s = "ruby linguist_wrapper.rb \'{}\'".format(s)
-    os.system(s)
+    return os.system(s)
