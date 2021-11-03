@@ -1,23 +1,9 @@
-#include <stdio.h>
-
-// Fibonnacci function
-int fib(int number)
+int fib (int n)
 {
-    if (number == 1 || number == 2)
-        return 1;
-    else
-        return fib(number - 1) + fib(number - 2);
-}
+  if (n > 1)
+    return fib (n - 1) + fib (n - 2);
+  else
+    return n;
+} 
 
-int main()
-{
-    int number;
-
-    // Asks for the number that is in n position in Fibonnacci sequence
-    printf("Number: ");
-    scanf("%d", &number);
-
-    printf("%d \n", fib(number));
-
-    return 0;
-}
+/* { dg-regexp "\[^\n\r\]+: warning: analysis bailed out early \\(\[0-9\]+ 'after-snode' enodes; \[0-9\]+ enodes\\) \[^\n\r\]*" } */

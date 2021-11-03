@@ -1,160 +1,190 @@
-/**
- * Kyler Smith, 2017
- * Stack data structure implementation.
- */
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
-////////////////////////////////////////////////////////////////////////////////
-// INCLUDES
-#include <stdio.h>
-#include <stdlib.h>
+// Stack scanning code for the garbage collector.
 
-////////////////////////////////////////////////////////////////////////////////
-// MACROS: CONSTANTS
+#include "runtime.h"
 
-////////////////////////////////////////////////////////////////////////////////
-// DATA STRUCTURES
-/**
- * creating a stucture with 'data'(type:int), two pointers 'next','pre' (type: struct node) .
- */
-struct node
-{
-    int data;
-    struct node *next;
-    struct node *pre;
-} * head, *tmp;
+#ifdef USING_SPLIT_STACK
 
-////////////////////////////////////////////////////////////////////////////////
-// GLOBAL VARIABLES
-int count = 0;
+extern void * __splitstack_find (void *, void *, size_t *, void **, void **,
+				 void **);
 
-////////////////////////////////////////////////////////////////////////////////
-// FUNCTION PROTOTYPES
-void create();
-void push(int x);
-int pop();
-int peek();
-int size();
-int isEmpty();
+extern void * __splitstack_find_context (void *context[10], size_t *, void **,
+					 void **, void **);
 
-////////////////////////////////////////////////////////////////////////////////
-// MAIN ENTRY POINT
+#endif
 
-int main(int argc, char const *argv[])
-{
-    int x, y, z;
+bool runtime_usestackmaps;
 
-    create();
-    push(4);
-    x = pop();
-    // 4. Count: 0. Empty: 1.
-    printf("%d.\t\tCount: %d.\tEmpty: %d.\n", x, size(), isEmpty());
+// Calling unwind_init in doscanstack only works if it does not do a
+// tail call to doscanstack1.
+#pragma GCC optimize ("-fno-optimize-sibling-calls")
 
-    push(1);
-    push(2);
-    push(3);
-    x = pop();
-    y = pop();
-    // 3, 2. Count: 1. Empty: 0;
-    printf("%d, %d.\t\tCount: %d.\tEmpty: %d.\n", x, y, size(), isEmpty());
-    pop();  // Empty the stack.
+extern void scanstackblock(uintptr addr, uintptr size, void *gcw)
+  __asm__(GOSYM_PREFIX "runtime.scanstackblock");
 
-    push(5);
-    push(6);
-    x = peek();
-    push(7);
-    y = pop();
-    push(8);
-    z = pop();
-    // 1, 6, 7, 8. Count: 2. Empty: 0.
-    printf("%d, %d, %d.\tCount: %d.\tEmpty: %d.\n", x, y, z, size(), isEmpty());
+static bool doscanstack1(G*, void*)
+  __attribute__ ((noinline));
 
-    return 0;
+// Scan gp's stack, passing stack chunks to scanstackblock.
+bool doscanstack(G *gp, void* gcw) {
+	// Save registers on the stack, so that if we are scanning our
+	// own stack we will see them.
+	if (!runtime_usestackmaps) {
+		__builtin_unwind_init();
+		flush_registers_to_secondary_stack();
+	}
+
+	return doscanstack1(gp, gcw);
 }
 
-/**
- * Initialize the stack to NULL.
- */
-void create() { head = NULL; }
+// Scan gp's stack after saving registers.
+static bool doscanstack1(G *gp, void *gcw) {
+#ifdef USING_SPLIT_STACK
+	void* sp;
+	size_t spsize;
+	void* next_segment;
+	void* next_sp;
+	void* initial_sp;
+	G* _g_;
 
-/**
- * Push data onto the stack.
- */
-void push(int x)
-{
-    if (head == NULL)
-    {
-        head = (struct node *)malloc(1 * sizeof(struct node));
-        head->next = NULL;
-        head->pre = NULL;
-        head->data = x;
-    }
-    else
-    {
-        tmp = (struct node *)malloc(1 * sizeof(struct node));
-        tmp->data = x;
-        tmp->next = NULL;
-        tmp->pre = head;
-        head->next = tmp;
-        head = tmp;
-    }
-    ++count;
+	_g_ = runtime_g();
+	if (runtime_usestackmaps) {
+		// If stack map is enabled, we get here only when we can unwind
+		// the stack being scanned. That is, either we are scanning our
+		// own stack, or we are scanning through a signal handler.
+		__go_assert((_g_ == gp) || ((_g_ == gp->m->gsignal) && (gp == gp->m->curg)));
+		return scanstackwithmap(gcw);
+	}
+	if (_g_ == gp) {
+		// Scanning our own stack.
+		// If we are on a signal stack, it can unwind through the signal
+		// handler and see the g stack, so just scan our own stack.
+		sp = __splitstack_find(nil, nil, &spsize, &next_segment,
+				       &next_sp, &initial_sp);
+	} else {
+		// Scanning another goroutine's stack.
+		// The goroutine is usually asleep (the world is stopped).
+
+		// The exception is that if the goroutine is about to enter or might
+		// have just exited a system call, it may be executing code such
+		// as schedlock and may have needed to start a new stack segment.
+		// Use the stack segment and stack pointer at the time of
+		// the system call instead, since that won't change underfoot.
+		if(gp->gcstack != 0) {
+			sp = (void*)(gp->gcstack);
+			spsize = gp->gcstacksize;
+			next_segment = (void*)(gp->gcnextsegment);
+			next_sp = (void*)(gp->gcnextsp);
+			initial_sp = (void*)(gp->gcinitialsp);
+		} else {
+			sp = __splitstack_find_context((void**)(&gp->stackcontext[0]),
+						       &spsize, &next_segment,
+						       &next_sp, &initial_sp);
+		}
+	}
+	if(sp != nil) {
+		scanstackblock((uintptr)(sp), (uintptr)(spsize), gcw);
+		while((sp = __splitstack_find(next_segment, next_sp,
+					      &spsize, &next_segment,
+					      &next_sp, &initial_sp)) != nil)
+			scanstackblock((uintptr)(sp), (uintptr)(spsize), gcw);
+	}
+#else
+	byte* bottom;
+	byte* top;
+	byte* nextsp2;
+	byte* initialsp2;
+
+	if(gp == runtime_g()) {
+		// Scanning our own stack.
+		bottom = (byte*)&gp;
+		nextsp2 = secondary_stack_pointer();
+	} else {
+		// Scanning another goroutine's stack.
+		// The goroutine is usually asleep (the world is stopped).
+		bottom = (void*)gp->gcnextsp;
+		if(bottom == nil)
+			return true;
+		nextsp2 = (void*)gp->gcnextsp2;
+	}
+	top = (byte*)(void*)(gp->gcinitialsp) + gp->gcstacksize;
+	if(top > bottom)
+		scanstackblock((uintptr)(bottom), (uintptr)(top - bottom), gcw);
+	else
+		scanstackblock((uintptr)(top), (uintptr)(bottom - top), gcw);
+	if (nextsp2 != nil) {
+		initialsp2 = (byte*)(void*)(gp->gcinitialsp2);
+		if(initialsp2 > nextsp2)
+			scanstackblock((uintptr)(nextsp2), (uintptr)(initialsp2 - nextsp2), gcw);
+		else
+			scanstackblock((uintptr)(initialsp2), (uintptr)(nextsp2 - initialsp2), gcw);
+	}
+#endif
+	return true;
 }
 
-/**
- * Pop data from the stack
- */
-int pop()
+extern bool onCurrentStack(uintptr p)
+  __asm__(GOSYM_PREFIX "runtime.onCurrentStack");
+
+bool onCurrentStack(uintptr p)
 {
-    int returnData;
-    if (head == NULL)
-    {
-        printf("ERROR: Pop from empty stack.\n");
-        exit(1);
-    }
-    else
-    {
-        returnData = head->data;
+#ifdef USING_SPLIT_STACK
 
-        if (head->pre == NULL)
-        {
-            free(head);
-            head = NULL;
-        }
-        else
-        {
-            head = head->pre;
-            free(head->next);
-        }
-    }
-    --count;
-    return returnData;
-}
+	void* sp;
+	size_t spsize;
+	void* next_segment;
+	void* next_sp;
+	void* initial_sp;
 
-/**
- * Returns the next value to be popped.
- */
-int peek()
-{
-    if (head != NULL)
-        return head->data;
-    else
-    {
-        printf("ERROR: Peeking from empty stack.");
-        exit(1);
-    }
-}
+	sp = __splitstack_find(nil, nil, &spsize, &next_segment, &next_sp,
+			       &initial_sp);
+	while (sp != nil) {
+		if (p >= (uintptr)(sp) && p < (uintptr)(sp) + spsize) {
+			return true;
+		}
+		sp = __splitstack_find(next_segment, next_sp, &spsize,
+				       &next_segment, &next_sp, &initial_sp);
+	}
+	return false;
 
-/**
- * Returns the size of the stack.
- */
-int size() { return count; }
+#else
 
-/**
- * Returns 1 if stack is empty, returns 0 if not empty.
- */
-int isEmpty()
-{
-    if (count == 0)
-        return 1;
-    return 0;
+	G* gp;
+	byte* bottom;
+	byte* top;
+	byte* temp;
+	byte* nextsp2;
+	byte* initialsp2;
+
+	gp = runtime_g();
+	bottom = (byte*)(&p);
+	top = (byte*)(void*)(gp->gcinitialsp) + gp->gcstacksize;
+	if ((uintptr)(top) < (uintptr)(bottom)) {
+		temp = top;
+		top = bottom;
+		bottom = temp;
+	}
+	if (p >= (uintptr)(bottom) && p < (uintptr)(top)) {
+		return true;
+	}
+
+	nextsp2 = secondary_stack_pointer();
+	if (nextsp2 != nil) {
+		initialsp2 = (byte*)(void*)(gp->gcinitialsp2);
+		if ((uintptr)(initialsp2) < (uintptr)(nextsp2)) {
+			temp = initialsp2;
+			initialsp2 = nextsp2;
+			nextsp2 = temp;
+		}
+		if (p >= (uintptr)(nextsp2) && p < (uintptr)(initialsp2)) {
+			return true;
+		}
+	}
+
+	return false;
+
+#endif
 }

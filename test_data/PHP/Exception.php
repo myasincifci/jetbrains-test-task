@@ -1,40 +1,21 @@
 <?php
 
-/**
- * PHPMailer Exception class.
- * PHP Version 5.5.
+/*
+ * This file is part of the Symfony package.
  *
- * @see       https://github.com/PHPMailer/PHPMailer/ The PHPMailer GitHub project
+ * (c) Fabien Potencier <fabien@symfony.com>
  *
- * @author    Marcus Bointon (Synchro/coolbru) <phpmailer@synchromedia.co.uk>
- * @author    Jim Jagielski (jimjag) <jimjag@gmail.com>
- * @author    Andy Prevost (codeworxtech) <codeworxtech@users.sourceforge.net>
- * @author    Brent R. Matzelle (original founder)
- * @copyright 2012 - 2020 Marcus Bointon
- * @copyright 2010 - 2012 Jim Jagielski
- * @copyright 2004 - 2009 Andy Prevost
- * @license   http://www.gnu.org/copyleft/lesser.html GNU Lesser General Public License
- * @note      This program is distributed in the hope that it will be useful - WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
  */
 
-namespace PHPMailer\PHPMailer;
+namespace Symfony\Component\Config\Definition\Exception;
 
 /**
- * PHPMailer exception handler.
+ * Base exception for all configuration exceptions.
  *
- * @author Marcus Bointon <phpmailer@synchromedia.co.uk>
+ * @author Johannes M. Schmitt <schmittjoh@gmail.com>
  */
-class Exception extends \Exception
+class Exception extends \RuntimeException
 {
-    /**
-     * Prettify error message output.
-     *
-     * @return string
-     */
-    public function errorMessage()
-    {
-        return '<strong>' . htmlspecialchars($this->getMessage(), ENT_COMPAT | ENT_HTML401) . "</strong><br />\n";
-    }
 }

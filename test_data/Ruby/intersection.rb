@@ -1,126 +1,84 @@
-# Challenge name: Intersection of two arrays ii
-#
-# Given two arrays, write a function to compute their intersection.
-#
-# @param {Integer[]} nums1
-# @param {Integer[]} nums2
-# @return {Integer[]}
-
-#
-# Approach 1: Brute Force
-#
-# Time Complexity: O(n^2)
-#
-def intersect(arr1, arr2)
-  result = []
-
-  if arr1.length < arr2.length
-    shorter = arr1
-    longer = arr2
-  else
-    shorter = arr2
-    longer = arr1
+describe :array_intersection, shared: true do
+  it "creates an array with elements common to both arrays (intersection)" do
+    [].send(@method, []).should == []
+    [1, 2].send(@method, []).should == []
+    [].send(@method, [1, 2]).should == []
+    [ 1, 3, 5 ].send(@method, [ 1, 2, 3 ]).should == [1, 3]
   end
 
-  shorter.each do |matcher|
-    longer.each do |number|
-      next if number != matcher
+  it "creates an array with no duplicates" do
+    [ 1, 1, 3, 5 ].send(@method, [ 1, 2, 3 ]).uniq!.should == nil
+  end
 
-      result.push(number)
-      break
+  it "creates an array with elements in order they are first encountered" do
+    [ 1, 2, 3, 2, 5 ].send(@method, [ 5, 2, 3, 4 ]).should == [2, 3, 5]
+  end
+
+  it "does not modify the original Array" do
+    a = [1, 1, 3, 5]
+    a.send(@method, [1, 2, 3]).should == [1, 3]
+    a.should == [1, 1, 3, 5]
+  end
+
+  it "properly handles recursive arrays" do
+    empty = ArraySpecs.empty_recursive_array
+    empty.send(@method, empty).should == empty
+
+    ArraySpecs.recursive_array.send(@method, []).should == []
+    [].send(@method, ArraySpecs.recursive_array).should == []
+
+    ArraySpecs.recursive_array.send(@method, ArraySpecs.recursive_array).should == [1, 'two', 3.0, ArraySpecs.recursive_array]
+  end
+
+  it "tries to convert the passed argument to an Array using #to_ary" do
+    obj = mock('[1,2,3]')
+    obj.should_receive(:to_ary).and_return([1, 2, 3])
+    [1, 2].send(@method, obj).should == ([1, 2])
+  end
+
+  it "determines equivalence between elements in the sense of eql?" do
+    not_supported_on :opal do
+      [5.0, 4.0].send(@method, [5, 4]).should == []
     end
+
+    str = "x"
+    [str].send(@method, [str.dup]).should == [str]
+
+    obj1 = mock('1')
+    obj2 = mock('2')
+    obj1.stub!(:hash).and_return(0)
+    obj2.stub!(:hash).and_return(0)
+    obj1.should_receive(:eql?).at_least(1).and_return(true)
+    obj2.stub!(:eql?).and_return(true)
+
+    [obj1].send(@method, [obj2]).should == [obj1]
+    [obj1, obj1, obj2, obj2].send(@method, [obj2]).should == [obj1]
+
+    obj1 = mock('3')
+    obj2 = mock('4')
+    obj1.stub!(:hash).and_return(0)
+    obj2.stub!(:hash).and_return(0)
+    obj1.should_receive(:eql?).at_least(1).and_return(false)
+
+    [obj1].send(@method, [obj2]).should == []
+    [obj1, obj1, obj2, obj2].send(@method, [obj2]).should == [obj2]
   end
 
-  result
-end
-
-nums1 = [1, 2, 2, 1]
-nums2 = [2, 2]
-puts intersect(nums1, nums2)
-# => [2,2]
-
-nums1 = [4, 9, 5]
-nums2 = [9, 4, 9, 8, 4]
-puts intersect(nums1, nums2)
-# => [4,9]
-
-#
-# Approach 2: Hash
-#
-# Complexity Analysis
-#
-# Time Complexity: O(n+m), where n and m are the lengths of the arrays.
-# We iterate through the first, and then through the second array; insert
-# and lookup operations in the hash map take a constant time.
-#
-# Space Complexity: O(min(n,m)). We use hash map to store numbers (and their
-# counts) from the smaller array.
-#
-def intersect(arr1, arr2)
-  result = []
-
-  hash = Hash.new(0)
-
-  arr2.each { |num| hash[num] += 1 }
-
-  arr1.each do |num|
-    if hash.has_key?(num)
-      result << num if hash[num] >= 1
-      hash[num] -= 1
-    end
+  it "does return subclass instances for Array subclasses" do
+    ArraySpecs::MyArray[1, 2, 3].send(@method, []).should be_an_instance_of(Array)
+    ArraySpecs::MyArray[1, 2, 3].send(@method, ArraySpecs::MyArray[1, 2, 3]).should be_an_instance_of(Array)
+    [].send(@method, ArraySpecs::MyArray[1, 2, 3]).should be_an_instance_of(Array)
   end
 
-  result
-end
-
-nums1 = [1, 2, 2, 1]
-nums2 = [2, 2]
-puts intersect(nums1, nums2)
-# => [2,2]
-
-nums1 = [4, 9, 5]
-nums2 = [9, 4, 9, 8, 4]
-puts intersect(nums1, nums2)
-# => [4,9]
-
-#
-# Approach 3: Two Pointers
-#
-# Complexity analysis:
-
-# Time Complexity: O(nlogn + mlogm), where n and m are the lengths of the arrays. We sort two arrays independently and then do a linear scan.
-# Space Complexity: from O(logn+logm) to O(n+m), depending on the implementation of the sorting algorithm.
-#
-def intersect(nums1, nums2)
-  result = []
-  p1 = 0
-  p2 = 0
-  nums1 = nums1.sort
-  nums2 = nums2.sort
-  while p1 < nums1.length && p2 < nums2.length
-    if nums1[p1] < nums2[p2]
-      p1 += 1
-    elsif nums1[p1] > nums2[p2]
-      p2 += 1
-    elsif nums1[p1] == nums2[p2]
-      result << nums1[p1]
-      p1 += 1
-      p2 += 1
-    end
+  it "does not call to_ary on array subclasses" do
+    [5, 6].send(@method, ArraySpecs::ToAryArray[1, 2, 5, 6]).should == [5, 6]
   end
 
-  result
+  it "properly handles an identical item even when its #eql? isn't reflexive" do
+    x = mock('x')
+    x.stub!(:hash).and_return(42)
+    x.stub!(:eql?).and_return(false) # Stubbed for clarity and latitude in implementation; not actually sent by MRI.
+
+    [x].send(@method, [x]).should == [x]
+  end
 end
-nums1 = [1, 2, 2, 1]
-nums2 = [2, 2]
-intersect(nums1, nums2)
-
-nums1 = [1, 2, 2, 1]
-nums2 = [2, 2]
-puts intersect(nums1, nums2)
-# => [2,2]
-
-nums1 = [4, 9, 5]
-nums2 = [9, 4, 9, 8, 4]
-puts intersect(nums1, nums2)
-# => [4,9]

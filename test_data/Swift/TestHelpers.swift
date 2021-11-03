@@ -1,44 +1,20 @@
-// TestHelpers.swift - Copyright 2020 SwifterSwift
+//===----------------------------------------------------------------------===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
 
-enum Season: String {
-    case summer
-    case autumn
-    case winter
-    case spring
-}
+class DummyClass {}
 
-/**
- These structs used to test ArrayExtensions and RangeReplaceableCollection.
- Feel free to use it for your needs.
- */
-struct SimplePerson: Equatable {
-    let forename, surname: String
-    let age: Int
-}
-
-struct Person: Equatable {
-    var name: String
-    var age: Int?
-    var location: Location?
-    var isStudent: Bool
-
-    init(name: String, age: Int?, location: Location? = nil, isStudent: Bool = false) {
-        self.name = name
-        self.age = age
-        self.location = location
-        self.isStudent = isStudent
-    }
-}
-
-struct Location: Equatable {
-    let city: String
-}
-
-struct TestStruct: ExpressibleByIntegerLiteral, Equatable {
-    var testField: Int = 0
-    typealias IntegerLiteralType = Int
-
-    init(integerLiteral value: Int) {
-        testField = value
-    }
+// Used by the weak.mm runtime tests. All that matters is that the returned
+// object is an instance of a pure Swift class.
+@_silgen_name("_swift_StdlibUnittest_make_swift_object")
+public func make_swift_object() -> AnyObject {
+  return DummyClass()
 }

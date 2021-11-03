@@ -1,40 +1,45 @@
-// sieve.go
-// description: Algorithms for generating prime numbers efficiently
-// author(s) [Taj](https://github.com/tjgurwara99)
-// see sieve_test.go
+// build
 
-package prime
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
-// Generate generates the sequence of integers starting at 2 and sends it to the channel `ch`
-func GenerateChannel(ch chan<- int) {
+// Test basic concurrency: the classic prime sieve.
+// Do not run - loops forever.
+
+package main
+
+// Send the sequence 2, 3, 4, ... to channel 'ch'.
+func Generate(ch chan<- int) {
 	for i := 2; ; i++ {
-		ch <- i
+		ch <- i // Send 'i' to channel 'ch'.
 	}
 }
 
-// Sieve Sieving the numbers that are not prime from the channel - basically removing them from the channels
-func Sieve(in <-chan int, out chan<- int, prime int) {
+// Copy the values from channel 'in' to channel 'out',
+// removing those divisible by 'prime'.
+func Filter(in <-chan int, out chan<- int, prime int) {
 	for {
-		i := <-in
+		i := <-in // Receive value of new variable 'i' from 'in'.
 		if i%prime != 0 {
-			out <- i
+			out <- i // Send 'i' to channel 'out'.
 		}
 	}
 }
 
-// Generate returns a int slice of prime numbers up to the limit
-func Generate(limit int) []int {
-	var primes []int
-
-	ch := make(chan int)
-	go GenerateChannel(ch)
-
-	for i := 0; i < limit; i++ {
-		primes = append(primes, <-ch)
+// The prime sieve: Daisy-chain Filter processes together.
+func Sieve() {
+	ch := make(chan int) // Create a new channel.
+	go Generate(ch)      // Start Generate() as a subprocess.
+	for {
+		prime := <-ch
+		print(prime, "\n")
 		ch1 := make(chan int)
-		go Sieve(ch, ch1, primes[i])
+		go Filter(ch, ch1, prime)
 		ch = ch1
 	}
+}
 
-	return primes
+func main() {
+	Sieve()
 }

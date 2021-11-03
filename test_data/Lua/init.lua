@@ -1,176 +1,124 @@
+local utils = require "lvim.utils"
+local Log = require "lvim.core.log"
 
-local init = {}
+local M = {}
+local user_config_dir = get_config_dir()
+local user_config_file = utils.join_paths(user_config_dir, "config.lua")
 
-local cfg = require("luarocks.core.cfg")
-local fs = require("luarocks.fs")
-local path = require("luarocks.path")
-local deps = require("luarocks.deps")
-local dir = require("luarocks.dir")
-local util = require("luarocks.util")
-local persist = require("luarocks.persist")
-local write_rockspec = require("luarocks.cmd.write_rockspec")
-
-function init.add_to_parser(parser)
-   local cmd = parser:command("init", "Initialize a directory for a Lua project using LuaRocks.", util.see_also())
-
-   cmd:argument("name", "The project name.")
-      :args("?")
-   cmd:argument("version", "An optional project version.")
-      :args("?")
-   cmd:flag("--reset", "Delete .luarocks/config-5.x.lua and ./lua and generate new ones.")
-
-   cmd:group("Options for specifying rockspec data", write_rockspec.cmd_options(cmd))
+local function apply_defaults(configs, defaults)
+  configs = configs or {}
+  return vim.tbl_deep_extend("keep", configs, defaults)
 end
 
-local function write_gitignore(entries)
-   local gitignore = ""
-   local fd = io.open(".gitignore", "r")
-   if fd then
-      gitignore = fd:read("*a")
-      fd:close()
-      gitignore = "\n" .. gitignore .. "\n"
-   end
-
-   fd = io.open(".gitignore", gitignore and "a" or "w")
-   for _, entry in ipairs(entries) do
-      entry = "/" .. entry
-      if not gitignore:find("\n"..entry.."\n", 1, true) then
-         fd:write(entry.."\n")
-      end
-   end
-   fd:close()
+---Get the full path to the user configuration file
+---@return string
+function M:get_user_config_path()
+  return user_config_file
 end
 
---- Driver function for "init" command.
--- @return boolean: True if succeeded, nil on errors.
-function init.command(args)
+--- Initialize lvim default configuration
+-- Define lvim global variable
+function M:init()
+  if vim.tbl_isempty(lvim or {}) then
+    lvim = require "lvim.config.defaults"
+    local home_dir = vim.loop.os_homedir()
+    lvim.vsnip_dir = utils.join_paths(home_dir, ".config", "snippets")
+    lvim.database = { save_location = utils.join_paths(home_dir, ".config", "lunarvim_db"), auto_execute = 1 }
+  end
 
-   local pwd = fs.current_dir()
+  local builtins = require "lvim.core.builtins"
+  builtins.config { user_config_file = user_config_file }
 
-   if not args.name then
-      args.name = dir.base_name(pwd)
-      if args.name == "/" then
-         return nil, "When running from the root directory, please specify the <name> argument"
-      end
-   end
+  local settings = require "lvim.config.settings"
+  settings.load_options()
 
-   util.title("Initializing project '" .. args.name .. "' for Lua " .. cfg.lua_version .. " ...")
+  local default_keymaps = require("lvim.keymappings").get_defaults()
+  lvim.keys = apply_defaults(lvim.keys, default_keymaps)
 
-   util.printout("Checking your Lua installation ...")
-   if not cfg.lua_found then
-      return nil, "Lua installation is not found."
-   end
-   local ok, err = deps.check_lua_incdir(cfg.variables)
-   if not ok then
-      return nil, err
-   end
+  local autocmds = require "lvim.core.autocmds"
+  lvim.autocommands = apply_defaults(lvim.autocommands, autocmds.load_augroups())
 
-   local has_rockspec = false
-   for file in fs.dir() do
-      if file:match("%.rockspec$") then
-         has_rockspec = true
-         break
-      end
-   end
+  local lvim_lsp_config = require "lvim.lsp.config"
+  lvim.lsp = apply_defaults(lvim.lsp, vim.deepcopy(lvim_lsp_config))
 
-   if not has_rockspec then
-      args.version = args.version or "dev"
-      args.location = pwd
-      local ok, err = write_rockspec.command(args)
-      if not ok then
-         util.printerr(err)
-      end
-   end
-
-   local ext = cfg.wrapper_suffix
-   local luarocks_wrapper = "luarocks" .. ext
-   local lua_wrapper = "lua" .. ext
-
-   util.printout("Adding entries to .gitignore ...")
-   write_gitignore({ luarocks_wrapper, lua_wrapper, "lua_modules", ".luarocks" })
-
-   util.printout("Preparing ./.luarocks/ ...")
-   fs.make_dir(".luarocks")
-   local config_file = ".luarocks/config-" .. cfg.lua_version .. ".lua"
-
-   if args.reset then
-      fs.delete(lua_wrapper)
-      fs.delete(config_file)
-   end
-
-   local config_tbl, err = persist.load_config_file_if_basic(config_file, cfg)
-   if config_tbl then
-      local globals = {
-         "lua_interpreter",
-      }
-      for _, v in ipairs(globals) do
-         if cfg[v] then
-            config_tbl[v] = cfg[v]
-         end
-      end
-
-      local varnames = {
-         "LUA_DIR",
-         "LUA_INCDIR",
-         "LUA_LIBDIR",
-         "LUA_BINDIR",
-         "LUA_INTERPRETER",
-      }
-      for _, varname in ipairs(varnames) do
-         if cfg.variables[varname] then
-            config_tbl.variables = config_tbl.variables or {}
-            config_tbl.variables[varname] = cfg.variables[varname]
-         end
-      end
-      local ok, err = persist.save_from_table(config_file, config_tbl)
-      if ok then
-         util.printout("Wrote " .. config_file)
-      else
-         util.printout("Failed writing " .. config_file .. ": " .. err)
-      end
-   else
-      util.printout("Will not attempt to overwrite " .. config_file)
-   end
-
-   ok, err = persist.save_default_lua_version(".luarocks", cfg.lua_version)
-   if not ok then
-      util.printout("Failed setting default Lua version: " .. err)
-   end
-
-   util.printout("Preparing ./lua_modules/ ...")
-
-   fs.make_dir("lua_modules/lib/luarocks/rocks-" .. cfg.lua_version)
-   local tree = dir.path(pwd, "lua_modules")
-
-   luarocks_wrapper = dir.path(".", luarocks_wrapper)
-   if not fs.exists(luarocks_wrapper) then
-      util.printout("Preparing " .. luarocks_wrapper .. " ...")
-      fs.wrap_script(arg[0], "luarocks", "none", nil, nil, "--project-tree", tree)
-   else
-      util.printout(luarocks_wrapper .. " already exists. Not overwriting it!")
-   end
-
-   lua_wrapper = dir.path(".", lua_wrapper)
-   local write_lua_wrapper = true
-   if fs.exists(lua_wrapper) then
-      if not util.lua_is_wrapper(lua_wrapper) then
-         util.printout(lua_wrapper .. " already exists and does not look like a wrapper script. Not overwriting.")
-         write_lua_wrapper = false
-      end
-   end
-
-   if write_lua_wrapper then
-      local interp = dir.path(cfg.variables["LUA_BINDIR"], cfg.lua_interpreter)
-      if util.check_lua_version(interp, cfg.lua_version) then
-         util.printout("Preparing " .. lua_wrapper .. " for version " .. cfg.lua_version .. "...")
-         path.use_tree(tree)
-         fs.wrap_script(nil, "lua", "all")
-      else
-         util.warning("No Lua interpreter detected for version " .. cfg.lua_version .. ". Not creating " .. lua_wrapper)
-      end
-   end
-
-   return true
+  local supported_languages = require "lvim.config.supported_languages"
+  require("lvim.lsp.manager").init_defaults(supported_languages)
 end
 
-return init
+local function handle_deprecated_settings()
+  local function deprecation_notice(setting)
+    local in_headless = #vim.api.nvim_list_uis() == 0
+    if in_headless then
+      return
+    end
+
+    local msg = string.format(
+      "Deprecation notice: [%s] setting is no longer supported. See https://github.com/LunarVim/LunarVim#breaking-changes",
+      setting
+    )
+    vim.schedule(function()
+      vim.notify(msg, vim.log.levels.WARN)
+    end)
+  end
+
+  ---lvim.lang.FOO.lsp
+  for lang, entry in pairs(lvim.lang) do
+    local deprecated_config = entry["lsp"] or {}
+    if not vim.tbl_isempty(deprecated_config) then
+      deprecation_notice(string.format("lvim.lang.%s.lsp", lang))
+    end
+  end
+end
+
+--- Override the configuration with a user provided one
+-- @param config_path The path to the configuration overrides
+function M:load(config_path)
+  local autocmds = require "lvim.core.autocmds"
+  config_path = config_path or self.get_user_config_path()
+  local ok, err = pcall(dofile, config_path)
+  if not ok then
+    if utils.is_file(user_config_file) then
+      Log:warn("Invalid configuration: " .. err)
+    else
+      Log:warn(string.format("Unable to find configuration file [%s]", config_path))
+    end
+  end
+
+  handle_deprecated_settings()
+
+  autocmds.define_augroups(lvim.autocommands)
+
+  vim.g.mapleader = (lvim.leader == "space" and " ") or lvim.leader
+  require("lvim.keymappings").load(lvim.keys)
+
+  local settings = require "lvim.config.settings"
+  settings.load_commands()
+end
+
+--- Override the configuration with a user provided one
+-- @param config_path The path to the configuration overrides
+function M:reload()
+  local lvim_modules = {}
+  for module, _ in pairs(package.loaded) do
+    if module:match "lvim.core" then
+      package.loaded.module = nil
+      table.insert(lvim_modules, module)
+    end
+  end
+
+  M:init()
+  M:load()
+
+  local plugins = require "lvim.plugins"
+  utils.toggle_autoformat()
+  local plugin_loader = require "lvim.plugin-loader"
+  plugin_loader.cache_clear()
+  plugin_loader.load { plugins, lvim.plugins }
+  vim.cmd ":PackerInstall"
+  vim.cmd ":PackerCompile"
+  -- vim.cmd ":PackerClean"
+  require("lvim.lsp").setup()
+  Log:info "Reloaded configuration"
+end
+
+return M

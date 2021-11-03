@@ -1,107 +1,54 @@
-// Package trie provides Trie data structures in golang.
-//
-// Wikipedia: https://en.wikipedia.org/wiki/Trie
-package trie
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
-// Node represents each node in Trie.
-type Node struct {
-	children map[rune]*Node // map children nodes
-	isLeaf   bool           // current node value
+package norm
+
+type valueRange struct {
+	value  uint16 // header: value:stride
+	lo, hi byte   // header: lo:n
 }
 
-// NewNode creates a new Trie node with initialized
-// children map.
-func NewNode() *Node {
-	n := &Node{}
-	n.children = make(map[rune]*Node)
-	n.isLeaf = false
-	return n
+type sparseBlocks struct {
+	values []valueRange
+	offset []uint16
 }
 
-// insert a single word at a Trie node.
-func (n *Node) insert(s string) {
-	curr := n
-	for _, c := range s {
-		next, ok := curr.children[c]
-		if !ok {
-			next = NewNode()
-			curr.children[c] = next
+var nfcSparse = sparseBlocks{
+	values: nfcSparseValues[:],
+	offset: nfcSparseOffset[:],
+}
+
+var nfkcSparse = sparseBlocks{
+	values: nfkcSparseValues[:],
+	offset: nfkcSparseOffset[:],
+}
+
+var (
+	nfcData  = newNfcTrie(0)
+	nfkcData = newNfkcTrie(0)
+)
+
+// lookupValue determines the type of block n and looks up the value for b.
+// For n < t.cutoff, the block is a simple lookup table. Otherwise, the block
+// is a list of ranges with an accompanying value. Given a matching range r,
+// the value for b is by r.value + (b - r.lo) * stride.
+func (t *sparseBlocks) lookup(n uint32, b byte) uint16 {
+	offset := t.offset[n]
+	header := t.values[offset]
+	lo := offset + 1
+	hi := lo + uint16(header.lo)
+	for lo < hi {
+		m := lo + (hi-lo)/2
+		r := t.values[m]
+		if r.lo <= b && b <= r.hi {
+			return r.value + uint16(b-r.lo)*header.value
 		}
-		curr = next
-	}
-	curr.isLeaf = true
-}
-
-// Insert zero, one or more words at a Trie node.
-func (n *Node) Insert(s ...string) {
-	for _, ss := range s {
-		n.insert(ss)
-	}
-}
-
-// Find  words at a Trie node.
-func (n *Node) Find(s string) bool {
-	next, ok := n, false
-	for _, c := range s {
-		next, ok = next.children[c]
-		if !ok {
-			return false
-		}
-	}
-	return next.isLeaf
-}
-
-// Capacity returns the number of nodes in the Trie
-func (n *Node) Capacity() int {
-	r := 0
-	for _, c := range n.children {
-		r += c.Capacity()
-	}
-	return 1 + r
-}
-
-// Size returns the number of words in the Trie
-func (n *Node) Size() int {
-	r := 0
-	for _, c := range n.children {
-		r += c.Size()
-	}
-	if n.isLeaf {
-		r++
-	}
-	return r
-}
-
-// remove lazily a word from the Trie node, no node is actually removed.
-func (n *Node) remove(s string) {
-	if len(s) == 0 {
-		return
-	}
-	next, ok := n, false
-	for _, c := range s {
-		next, ok = next.children[c]
-		if !ok {
-			// word cannot be found - we're done !
-			return
+		if b < r.lo {
+			hi = m
+		} else {
+			lo = m + 1
 		}
 	}
-	next.isLeaf = false
-}
-
-// Remove zero, one or more words lazily from the Trie, no node is actually removed.
-func (n *Node) Remove(s ...string) {
-	for _, ss := range s {
-		n.remove(ss)
-	}
-}
-
-// Compact will remove unecessay nodes, reducing the capacity, returning true if node n itself should be removed.
-func (n *Node) Compact() (remove bool) {
-
-	for r, c := range n.children {
-		if c.Compact() {
-			delete(n.children, r)
-		}
-	}
-	return !n.isLeaf && len(n.children) == 0
+	return 0
 }

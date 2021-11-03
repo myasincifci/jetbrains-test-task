@@ -1,104 +1,74 @@
-package xor
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package cipher_test
 
 import (
+	"bytes"
+	"crypto/cipher"
+	"crypto/rand"
 	"fmt"
-	"reflect"
+	"io"
 	"testing"
 )
 
-func Example() {
-	const (
-		seed = "Hello World"
-		key  = 97
-	)
-
-	encrypted := Encrypt(byte(key), []byte(seed))
-	fmt.Printf("Encrypt=> key: %d, seed: %s, encryptedText: %v\n", key, seed, encrypted)
-
-	decrypted := Decrypt(byte(key), encrypted)
-	fmt.Printf("Decrypt=> key: %d, encryptedText: %v, DecryptedText: %s\n", key, encrypted, string(decrypted))
-
-	// Output:
-	// Encrypt=> key: 97, seed: Hello World, encryptedText: [41 4 13 13 14 65 54 14 19 13 5]
-	// Decrypt=> key: 97, encryptedText: [41 4 13 13 14 65 54 14 19 13 5], DecryptedText: Hello World
-}
-
-var xorTestData = []struct {
-	description string
-	input       string
-	key         int
-	encrypted   string
-}{
-	{
-		"Encrypt letter 'a' with key 0 makes no changes",
-		"a",
-		0,
-		"a",
-	},
-	{
-		"Encrypt letter 'a' with key 1",
-		"a",
-		1,
-		"`",
-	},
-	{
-		"Encrypt letter 'a' with key 10",
-		"a",
-		10,
-		"k",
-	},
-	{
-		"Encrypt 'hello world' with key 0 makes no changes",
-		"hello world",
-		0,
-		"hello world",
-	},
-	{
-		"Encrypt 'hello world' with key 1",
-		"hello world",
-		1,
-		"idmmn!vnsme",
-	},
-	{
-		"Encrypt 'hello world' with key 10",
-		"hello world",
-		10,
-		"boffe*}exfn",
-	},
-	{
-		"Encrypt full sentence with key 64",
-		"the quick brown fox jumps over the lazy dog.",
-		64,
-		"4(%`15)#+`\"2/7.`&/8`*5-03`/6%2`4(%`,!:9`$/'n",
-	},
-	{
-		"Encrypt a word with key 32 make the case swap",
-		"abcdefghijklmNOPQRSTUVWXYZ",
-		32,
-		"ABCDEFGHIJKLMnopqrstuvwxyz",
-	},
-}
-
-func TestXorCipherEncrypt(t *testing.T) {
-	for _, test := range xorTestData {
-		t.Run(test.description, func(t *testing.T) {
-			encrypted := Encrypt(byte(test.key), []byte(test.input))
-			if !reflect.DeepEqual(string(encrypted), test.encrypted) {
-				t.Logf("FAIL: %s", test.description)
-				t.Fatalf("Expecting %s, actual %s", test.encrypted, string(encrypted))
+func TestXOR(t *testing.T) {
+	for j := 1; j <= 1024; j++ {
+		if testing.Short() && j > 16 {
+			break
+		}
+		for alignP := 0; alignP < 2; alignP++ {
+			for alignQ := 0; alignQ < 2; alignQ++ {
+				for alignD := 0; alignD < 2; alignD++ {
+					p := make([]byte, j)[alignP:]
+					q := make([]byte, j)[alignQ:]
+					d1 := make([]byte, j+alignD)[alignD:]
+					d2 := make([]byte, j+alignD)[alignD:]
+					if _, err := io.ReadFull(rand.Reader, p); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := io.ReadFull(rand.Reader, q); err != nil {
+						t.Fatal(err)
+					}
+					cipher.XorBytes(d1, p, q)
+					n := min(p, q)
+					for i := 0; i < n; i++ {
+						d2[i] = p[i] ^ q[i]
+					}
+					if !bytes.Equal(d1, d2) {
+						t.Logf("p: %#v", p)
+						t.Logf("q: %#v", q)
+						t.Logf("expect: %#v", d2)
+						t.Logf("result: %#v", d1)
+						t.Fatal("not equal")
+					}
+				}
 			}
-		})
+		}
 	}
 }
 
-func TestXorCipherDecrypt(t *testing.T) {
-	for _, test := range xorTestData {
-		t.Run(test.description, func(t *testing.T) {
-			decrypted := Decrypt(byte(test.key), []byte(test.encrypted))
+func min(a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	return n
+}
 
-			if !reflect.DeepEqual(string(decrypted), test.input) {
-				t.Logf("FAIL: %s", test.description)
-				t.Fatalf("Expecting %s, actual %s", test.input, string(decrypted))
+func BenchmarkXORBytes(b *testing.B) {
+	dst := make([]byte, 1<<15)
+	data0 := make([]byte, 1<<15)
+	data1 := make([]byte, 1<<15)
+	sizes := []int64{1 << 3, 1 << 7, 1 << 11, 1 << 15}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%dBytes", size), func(b *testing.B) {
+			s0 := data0[:size]
+			s1 := data1[:size]
+			b.SetBytes(int64(size))
+			for i := 0; i < b.N; i++ {
+				cipher.XorBytes(dst, s0, s1)
 			}
 		})
 	}
