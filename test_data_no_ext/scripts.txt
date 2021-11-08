@@ -1,4 +1,0 @@
-find ./shiny -mindepth 2 -type f -exec mv -t ./shiny/ -i -f '{}' +
-
-find ./stack/ -type f  ! -name "*.hs" -delete
-
