@@ -19,3 +19,5 @@ RUN go get github.com/go-enry/go-enry/v2; exit 0
 RUN mv /root/go/src/github.com/go-enry/go-enry /root/go/src/github.com/go-enry/v2
 RUN mkdir /root/go/src/github.com/go-enry/go-enry
 RUN mv /root/go/src/github.com/go-enry/v2 /root/go/src/github.com/go-enry/go-enry/v2
+
+CMD jupyter notebook --ip 0.0.0.0 --no-browser --allow-root
